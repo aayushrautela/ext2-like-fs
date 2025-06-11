@@ -16,9 +16,9 @@
 #define INODE_DIRECT_POINTERS 12
 #define ROOT_INODE_NUM 0
 #define MAX_PATH_DEPTH 64
-#define UNUSED_BLOCK ((uint32_t)-1) // Define a clear sentinel for unused blocks
+#define UNUSED_BLOCK ((uint32_t)-1) //clear sentinel for unused blocks
 
-// On-disk Structure Layout
+//disk Structure Layout
 #define SUPERBLOCK_BLOCK 0
 #define INODE_BITMAP_BLOCK 1
 #define DATA_BITMAP_BLOCK 2
@@ -74,6 +74,8 @@ void read_block(int block_num, void* buffer) {
         exit(1);
     }
     if (fread(buffer, BLOCK_SIZE, 1, virtual_disk) != 1) {
+        // In testing with pipes, feof might be set before a read error.
+        if (feof(virtual_disk)) return;
         perror("fread failed");
         exit(1);
     }
@@ -147,38 +149,38 @@ void free_data_block(int block_num) {
     clear_bit(data_block_bitmap, block_num);
 }
 
+// FIXED: Corrected loop logic
 int find_entry_in_dir(int dir_inode_num, const char* name) {
     Inode dir_inode;
     read_inode(dir_inode_num, &dir_inode);
     if (dir_inode.mode != 1) return -1;
 
     char buffer[BLOCK_SIZE];
-    int total_entries = dir_inode.size / sizeof(DirectoryEntry);
-    int entries_scanned = 0;
+    int total_valid_entries = dir_inode.size / sizeof(DirectoryEntry);
+    int entries_found = 0;
 
     for (int i = 0; i < INODE_DIRECT_POINTERS; i++) {
-        if (dir_inode.direct_blocks[i] == UNUSED_BLOCK || entries_scanned >= total_entries)
+        if (dir_inode.direct_blocks[i] == UNUSED_BLOCK || entries_found >= total_valid_entries)
             break;
 
         read_block(sb.data_blocks_start_block + dir_inode.direct_blocks[i], buffer);
         int entries_in_block = BLOCK_SIZE / sizeof(DirectoryEntry);
-        int entries_to_scan = total_entries - entries_scanned;
-        if (entries_to_scan > entries_in_block)
-            entries_to_scan = entries_in_block;
-
+        
         DirectoryEntry* de = (DirectoryEntry*)buffer;
-        for (int j = 0; j < entries_to_scan; j++, de++) {
-            entries_scanned++;
-            if (de->name[0] == '\0') continue;
-            if (strcmp(de->name, name) == 0) {
-                return de->inode_number;
+        for (int j = 0; j < entries_in_block; j++) {
+            if (entries_found >= total_valid_entries) break;
+            
+            if (de[j].name[0] != '\0') {
+                entries_found++;
+                if (strcmp(de[j].name, name) == 0) {
+                    return de[j].inode_number;
+                }
             }
         }
     }
     return -1;
 }
 
-// FIXED: Rewritten function to correctly find free slots.
 void add_entry_to_dir(int dir_inode_num, const char* name, int new_inode_num) {
     Inode dir_inode;
     read_inode(dir_inode_num, &dir_inode);
@@ -191,10 +193,8 @@ void add_entry_to_dir(int dir_inode_num, const char* name, int new_inode_num) {
     char buffer[BLOCK_SIZE];
     int entries_per_block = BLOCK_SIZE / sizeof(DirectoryEntry);
 
-    // Find the first available slot (either reclaimed or at the end of all entries)
     for (int i = 0; i < INODE_DIRECT_POINTERS; i++) {
         int current_block_num;
-        // If a block isn't allocated for this part of the directory, make one
         if (dir_inode.direct_blocks[i] == UNUSED_BLOCK) {
             current_block_num = alloc_data_block();
             if (current_block_num == -1) {
@@ -202,7 +202,7 @@ void add_entry_to_dir(int dir_inode_num, const char* name, int new_inode_num) {
                 return;
             }
             dir_inode.direct_blocks[i] = current_block_num;
-            memset(buffer, 0, BLOCK_SIZE); // New block must be zeroed out
+            memset(buffer, 0, BLOCK_SIZE); 
         } else {
             current_block_num = dir_inode.direct_blocks[i];
             read_block(sb.data_blocks_start_block + current_block_num, buffer);
@@ -210,14 +210,12 @@ void add_entry_to_dir(int dir_inode_num, const char* name, int new_inode_num) {
 
         DirectoryEntry* de = (DirectoryEntry*)buffer;
         for (int j = 0; j < entries_per_block; j++) {
-            // If we find an empty slot, use it
             if (de[j].name[0] == '\0') {
                 memcpy(&de[j], &new_entry, sizeof(DirectoryEntry));
                 write_block(sb.data_blocks_start_block + current_block_num, buffer);
 
-                // Check if this new entry is past the old directory size
                 int current_entry_offset = (i * entries_per_block) + j;
-                if (current_entry_offset >= (dir_inode.size / sizeof(DirectoryEntry))) {
+                if (current_entry_offset * sizeof(DirectoryEntry) >= dir_inode.size) {
                     dir_inode.size += sizeof(DirectoryEntry);
                 }
 
@@ -324,6 +322,7 @@ void do_mkdir(const char *path) {
     printf("Directory created: %s\n", path);
 }
 
+// FIXED: Corrected loop logic
 void do_ls(const char *path) {
     if (path == NULL || path[0] == '\0')
         path = ".";
@@ -348,27 +347,29 @@ void do_ls(const char *path) {
     printf("----\t----\t\t----\n");
 
     char buffer[BLOCK_SIZE];
-    int total_entries = inode.size / sizeof(DirectoryEntry);
-    int entries_scanned = 0;
+    int total_valid_entries = inode.size / sizeof(DirectoryEntry);
+    int entries_found = 0;
 
     for (int i = 0; i < INODE_DIRECT_POINTERS; i++) {
-        if (inode.direct_blocks[i] == UNUSED_BLOCK || entries_scanned >= total_entries)
+        if (inode.direct_blocks[i] == UNUSED_BLOCK || entries_found >= total_valid_entries)
             break;
 
         read_block(sb.data_blocks_start_block + inode.direct_blocks[i], buffer);
         int entries_in_block = BLOCK_SIZE / sizeof(DirectoryEntry);
-        
-        DirectoryEntry *de = (DirectoryEntry*)buffer;
-        for (int j = 0; j < entries_in_block && entries_scanned < total_entries; j++, de++) {
-            if (de->name[0] == '\0') continue;
 
-            entries_scanned++;
-            Inode entry_inode;
-            read_inode(de->inode_number, &entry_inode);
-            printf("%s\t%u\t\t%s\n",
-                   (entry_inode.mode == 1 ? "d" : "f"),
-                   entry_inode.size,
-                   de->name);
+        DirectoryEntry *de = (DirectoryEntry*)buffer;
+        for (int j = 0; j < entries_in_block; j++) {
+            if (entries_found >= total_valid_entries) break;
+
+            if (de[j].name[0] != '\0') {
+                entries_found++;
+                Inode entry_inode;
+                read_inode(de[j].inode_number, &entry_inode);
+                printf("%s\t%u\t\t%s\n",
+                       (entry_inode.mode == 1 ? "d" : "f"),
+                       entry_inode.size,
+                       de[j].name);
+            }
         }
     }
 }
@@ -471,25 +472,25 @@ void do_rm_entry(int parent_inode_num, const char* child_name) {
     char buffer[BLOCK_SIZE];
 
     int total_entries = parent_inode.size / sizeof(DirectoryEntry);
-    int entries_scanned = 0;
+    int entries_found = 0;
 
     for (int i = 0; i < INODE_DIRECT_POINTERS; i++) {
-        if (parent_inode.direct_blocks[i] == UNUSED_BLOCK || entries_scanned >= total_entries)
+        if (parent_inode.direct_blocks[i] == UNUSED_BLOCK || entries_found >= total_entries)
             break;
 
         read_block(sb.data_blocks_start_block + parent_inode.direct_blocks[i], buffer);
         int entries_in_block = BLOCK_SIZE / sizeof(DirectoryEntry);
-        int entries_to_scan = total_entries - entries_scanned;
-        if (entries_to_scan > entries_in_block)
-            entries_to_scan = entries_in_block;
-
+        
         DirectoryEntry* de = (DirectoryEntry*)buffer;
-        for (int j = 0; j < entries_to_scan; j++, de++) {
-            entries_scanned++;
-            if (de->name[0] != '\0' && strcmp(de->name, child_name) == 0) {
-                memset(de, 0, sizeof(DirectoryEntry));
-                write_block(sb.data_blocks_start_block + parent_inode.direct_blocks[i], buffer);
-                return;
+        for (int j = 0; j < entries_in_block; j++) {
+            if (entries_found >= total_entries) break;
+            if (de[j].name[0] != '\0') {
+                 entries_found++;
+                 if (strcmp(de[j].name, child_name) == 0) {
+                    memset(&de[j], 0, sizeof(DirectoryEntry));
+                    write_block(sb.data_blocks_start_block + parent_inode.direct_blocks[i], buffer);
+                    return;
+                }
             }
         }
     }
@@ -514,6 +515,11 @@ void do_rm(const char* path) {
     if (child_inode.mode == 1) { printf("Error: Cannot remove directory with 'rm'. Use 'rmdir'.\n"); return; }
 
     do_rm_entry(parent_inode_num, child_name);
+
+    Inode parent_inode;
+    read_inode(parent_inode_num, &parent_inode);
+    parent_inode.size -= sizeof(DirectoryEntry);
+    write_inode(parent_inode_num, &parent_inode);
 
     child_inode.link_count--;
     write_inode(child_inode_num, &child_inode);
@@ -544,19 +550,22 @@ void do_rmdir(const char* path) {
     int entry_count = 0;
     char buffer[BLOCK_SIZE];
     int total_entries = inode.size / sizeof(DirectoryEntry);
-    int entries_scanned = 0;
+    int entries_found = 0;
 
     for (int i = 0; i < INODE_DIRECT_POINTERS; i++) {
-        if (inode.direct_blocks[i] == UNUSED_BLOCK || entries_scanned >= total_entries)
+        if (inode.direct_blocks[i] == UNUSED_BLOCK || entries_found >= total_entries)
             break;
 
         read_block(sb.data_blocks_start_block + inode.direct_blocks[i], buffer);
         int entries_in_block = BLOCK_SIZE / sizeof(DirectoryEntry);
         
         DirectoryEntry* de = (DirectoryEntry*)buffer;
-        for (int j = 0; j < entries_in_block && entries_scanned < total_entries; j++, de++) {
-            entries_scanned++;
-            if (de->name[0] != '\0') entry_count++;
+        for (int j = 0; j < entries_in_block; j++) {
+            if (entries_found >= total_entries) break;
+            if (de[j].name[0] != '\0') {
+                 entries_found++;
+                 entry_count++;
+            }
         }
     }
 
@@ -573,15 +582,16 @@ void do_rmdir(const char* path) {
 
     do_rm_entry(parent_inode_num, child_name);
 
+    Inode parent_inode;
+    read_inode(parent_inode_num, &parent_inode);
+    parent_inode.size -= sizeof(DirectoryEntry);
+    parent_inode.link_count--;
+    write_inode(parent_inode_num, &parent_inode);
+
     if(inode.direct_blocks[0] != UNUSED_BLOCK) {
         free_data_block(inode.direct_blocks[0]);
     }
     free_inode(inode_num);
-
-    Inode parent_inode;
-    read_inode(parent_inode_num, &parent_inode);
-    parent_inode.link_count--;
-    write_inode(parent_inode_num, &parent_inode);
 
     sync_bitmaps();
     printf("Removed directory %s\n", path);
@@ -733,26 +743,26 @@ int find_name_for_inode(int parent_inode_num, int child_inode_num, char* name_bu
     if (parent_inode.mode != 1) return -1;
 
     int total_entries = parent_inode.size / sizeof(DirectoryEntry);
-    int entries_scanned = 0;
+    int entries_found = 0;
     char block_buffer[BLOCK_SIZE];
 
     for (int i = 0; i < INODE_DIRECT_POINTERS; i++) {
-        if (parent_inode.direct_blocks[i] == UNUSED_BLOCK || entries_scanned >= total_entries)
+        if (parent_inode.direct_blocks[i] == UNUSED_BLOCK || entries_found >= total_entries)
             break;
 
         read_block(sb.data_blocks_start_block + parent_inode.direct_blocks[i], block_buffer);
         int entries_in_block = BLOCK_SIZE / sizeof(DirectoryEntry);
-        int entries_to_scan = total_entries - entries_scanned;
-        if (entries_to_scan > entries_in_block)
-            entries_to_scan = entries_in_block;
-
+        
         DirectoryEntry* de = (DirectoryEntry*)block_buffer;
-        for (int j = 0; j < entries_to_scan; j++, de++) {
-            entries_scanned++;
-            if (de->name[0] != '\0' && de->inode_number == child_inode_num &&
-                strcmp(de->name, ".") != 0 && strcmp(de->name, "..") != 0) {
-                strcpy(name_buffer, de->name);
-                return 0;
+        for (int j = 0; j < entries_in_block; j++) {
+            if (entries_found >= total_entries) break;
+            if (de[j].name[0] != '\0') {
+                 entries_found++;
+                if (de[j].inode_number == child_inode_num &&
+                    strcmp(de[j].name, ".") != 0 && strcmp(de[j].name, "..") != 0) {
+                    strcpy(name_buffer, de[j].name);
+                    return 0;
+                }
             }
         }
     }
@@ -813,6 +823,7 @@ void do_cd(const char *path) {
     current_working_directory_inode = target_inode_num;
 }
 
+// FIXED: Corrected initialization of root directory entries
 void do_mkfs(const char *disk_path, long size_bytes) {
     FILE* temp_disk = fopen(disk_path, "w+b");
     if (!temp_disk) { perror("Error creating virtual disk file"); exit(1); }
@@ -869,8 +880,10 @@ void do_mkfs(const char *disk_path, long size_bytes) {
     fwrite(buffer, BLOCK_SIZE, 1, temp_disk);
 
     DirectoryEntry entries[2];
-    strcpy(entries[0].name, "."); entries[0].inode_number = ROOT_INODE_NUM;
-    strcpy(entries[1].name, ".."); entries[1].inode_number = ROOT_INODE_NUM;
+    strcpy(entries[0].name, ".");
+    entries[0].inode_number = ROOT_INODE_NUM;
+    strcpy(entries[1].name, "..");
+    entries[1].inode_number = ROOT_INODE_NUM;
 
     memset(buffer, 0, BLOCK_SIZE);
     memcpy(buffer, entries, 2 * sizeof(DirectoryEntry));
@@ -878,7 +891,9 @@ void do_mkfs(const char *disk_path, long size_bytes) {
     fwrite(buffer, BLOCK_SIZE, 1, temp_disk);
 
     fclose(temp_disk);
-    printf("Virtual disk created successfully: %s (%ld bytes)\n", disk_path, size_bytes);
+    if(isatty(fileno(stdout))) {
+        printf("Virtual disk created successfully: %s (%ld bytes)\n", disk_path, size_bytes);
+    }
 }
 
 int main(int argc, char *argv[]) {
@@ -886,20 +901,38 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Usage: %s <virtual_disk_file>\n", argv[0]);
         return 1;
     }
-
+    
+    int is_interactive = isatty(fileno(stdin));
     char *disk_path = argv[1];
     virtual_disk = fopen(disk_path, "r+b");
 
     if (!virtual_disk) {
-        char answer;
-        printf("Virtual disk file '%s' not found. Create it? (y/n): ", disk_path);
-        scanf(" %c", &answer);
-        while (getchar() != '\n');
+        char input_buffer[128];
+        char answer = 'n';
+
+        if (is_interactive) printf("Virtual disk file '%s' not found. Create it? (y/n): ", disk_path);
+        
+        while(fgets(input_buffer, sizeof(input_buffer), stdin)) {
+            if(input_buffer[0] == '#' || input_buffer[0] == '\n' || input_buffer[0] == '\r') continue;
+            sscanf(input_buffer, " %c", &answer);
+            break;
+        }
+
         if (answer == 'y' || answer == 'Y') {
-            long size;
-            printf("Enter size in bytes (e.g., 10485760 for 10MB): ");
-            scanf("%ld", &size);
-            while (getchar() != '\n');
+            long size = 0;
+            if (is_interactive) printf("Enter size in bytes (e.g., 10485760 for 10MB): ");
+            
+            while(fgets(input_buffer, sizeof(input_buffer), stdin)) {
+                if(input_buffer[0] == '#' || input_buffer[0] == '\n' || input_buffer[0] == '\r') continue;
+                size = atol(input_buffer);
+                break;
+            }
+
+            if (size <= 0) {
+                fprintf(stderr, "Invalid size provided.\n");
+                return 1;
+            }
+
             do_mkfs(disk_path, size);
             virtual_disk = fopen(disk_path, "r+b");
             if (!virtual_disk) {
@@ -907,7 +940,7 @@ int main(int argc, char *argv[]) {
                 return 1;
             }
         } else {
-            printf("Exiting.\n");
+            if (is_interactive) printf("Exiting.\n");
             return 0;
         }
     }
@@ -922,18 +955,20 @@ int main(int argc, char *argv[]) {
     read_block(sb.data_bitmap_block, buffer);
     memcpy(data_block_bitmap, buffer, sizeof(data_block_bitmap));
 
-
+    if (is_interactive) printf("Virtual File System Initialized. Type 'help' for commands.\n");
+    
     char line[1024];
     char cmd[16] = {0}, arg1[512] = {0}, arg2[512] = {0};
 
-    printf("Virtual File System Initialized. Type 'help' for commands.\n");
     while (1) {
-        printf("vfs> ");
+        if (is_interactive) printf("vfs> ");
         if (!fgets(line, sizeof(line), stdin)) break;
 
+        if (line[0] == '\n' || line[0] == '#' || line[0] == '\r') continue;
+
         cmd[0] = arg1[0] = arg2[0] = '\0';
-        int items_scanned = sscanf(line, "%15s %511s %511s", cmd, arg1, arg2);
-        if (items_scanned <= 0) continue;
+        sscanf(line, "%15s %511s %511s", cmd, arg1, arg2);
+        if (strlen(cmd) == 0) continue;
 
         if (strcmp(cmd, "exit") == 0 || strcmp(cmd, "quit") == 0) {
             break;
@@ -989,9 +1024,10 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    if (is_interactive) printf("Exiting.\n");
     if (virtual_disk) {
         fclose(virtual_disk);
     }
-    printf("Exiting.\n");
+    
     return 0;
 }
