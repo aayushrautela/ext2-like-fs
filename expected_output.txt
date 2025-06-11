@@ -1,0 +1,100 @@
+Virtual disk file 'test_disk.img' not found. Create it? (y/n): Enter size in bytes (e.g., 10485760 for 10MB): Virtual disk created successfully: test_disk.img (10485760 bytes)
+Virtual File System Initialized. Type 'help' for commands.
+vfs> Disk Usage:
+  Inodes:      1 used, 511 free, 512 total
+  Data Blocks: 1 used, 2550 free, 2551 total
+  Disk Space:  4096 bytes used, 10444800 bytes free, 10485760 bytes total
+vfs> Directory created: /dir1
+vfs> Contents of /:
+Type	Size		Name
+----	----		----
+d	32		.
+d	32		..
+d	32		dir1
+vfs> vfs> /dir1
+vfs> Directory created: /dir1/subdir1
+vfs> Contents of /dir1:
+Type	Size		Name
+----	----		----
+d	32		.
+d	32		..
+d	32		subdir1
+vfs> Contents of /dir1:
+Type	Size		Name
+----	----		----
+d	32		.
+d	32		..
+d	32		subdir1
+vfs> vfs> /dir1/subdir1
+vfs> vfs> /
+vfs> Copied host_file.txt to /dir1/file1.txt
+vfs> Contents of /dir1:
+Type	Size		Name
+----	----		----
+d	32		.
+d	32		..
+d	32		subdir1
+f	26		file1.txt
+vfs> Appended 10 bytes to /dir1/file1.txt.
+vfs> Contents of /dir1:
+Type	Size		Name
+----	----		----
+d	32		.
+d	32		..
+d	32		subdir1
+f	36		file1.txt
+vfs> Shortened /dir1/file1.txt to 31 bytes.
+vfs> Contents of /dir1:
+Type	Size		Name
+----	----		----
+d	32		.
+d	32		..
+d	32		subdir1
+f	31		file1.txt
+vfs> Truncated /dir1/file1.txt to 0 bytes.
+vfs> Contents of /dir1:
+Type	Size		Name
+----	----		----
+d	32		.
+d	32		..
+d	32		subdir1
+f	0		file1.txt
+vfs> Created hard link /link1 -> /dir1/file1.txt
+vfs> Contents of /:
+Type	Size		Name
+----	----		----
+d	32		.
+d	32		..
+d	32		dir1
+f	0		link1
+vfs> Contents of /dir1:
+Type	Size		Name
+----	----		----
+d	32		.
+d	32		..
+d	32		subdir1
+f	0		file1.txt
+vfs> Removed /link1
+vfs> Contents of /:
+Type	Size		Name
+----	----		----
+d	32		.
+d	32		..
+d	32		dir1
+vfs> Copied /dir1/file1.txt to host_file_back.txt
+vfs> Directory created: /dir2
+vfs> Copied host_file.txt to /dir2/error_test_file.txt
+vfs> Error: Directory not empty.
+vfs> cd: not a directory: /dir2/error_test_file.txt
+vfs> Error: File or link not found.
+vfs> Error: Directory not found.
+vfs> Removed /dir2/error_test_file.txt
+vfs> Removed directory /dir2
+vfs> Removed /dir1/file1.txt
+vfs> Removed directory /dir1/subdir1
+vfs> Removed directory /dir1
+vfs> Disk Usage:
+  Inodes:      1 used, 511 free, 512 total
+  Data Blocks: 1 used, 2550 free, 2551 total
+  Disk Space:  4096 bytes used, 10444800 bytes free, 10485760 bytes total
+vfs> Exiting.
